@@ -38,3 +38,4 @@ interface C {
   a: number;
 }
 ```
+*(more examples can be seen in [./samples](https://github.com/Effanuel/blob-types/tree/master/samples) directory)*
