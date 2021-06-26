@@ -1,4 +1,7 @@
 import fs from 'fs';
+import R from './R';
+
+const INTERFACE_SIGNATURE = /interface \w+( extends \w+)? {.*?\n}/gs;
 
 const partition = <T>(array: T[], isValid: (elem: T) => boolean): [T[], T[]] =>
   array.reduce(
@@ -7,22 +10,17 @@ const partition = <T>(array: T[], isValid: (elem: T) => boolean): [T[], T[]] =>
   );
 
 interface InterfaceTemplate {
-  name: string | undefined;
-  value: string;
+  name: string | null;
   extendsName: string | null;
   pureValue: string | undefined;
 }
 
 const findInterfaces = (data: string): InterfaceTemplate[] =>
-  (data.match(/interface \w+( extends \w+)? {.*?\n}/gs) ?? []).map((item) => {
-    const value = item.includes(' extends ') ? item.replace(/ extends \w+/g, '') : item;
-    return {
-      name: /interface (\w+)/g.exec(item)?.[1],
-      extendsName: item.includes(' extends ') ? /interface \w+ extends (\w+) {/g.exec(item)?.[1] ?? null : null,
-      pureValue: value.match(/(?<=\n).*\n/gs)?.[0],
-      value,
-    };
-  });
+  (data.match(INTERFACE_SIGNATURE) ?? []).map((item) => ({
+    name: R.captureGroup({regex: /interface (\w+)/g, value: item}),
+    extendsName: R.captureGroup({regex: /interface \w+ extends (\w+) {/g, value: item}),
+    pureValue: item.match(/(?<=\n).*\n/gs)?.[0],
+  }));
 
 const createPurifier = (interfaces: InterfaceTemplate[]) => {
   const purify = (template: InterfaceTemplate): any => {
@@ -41,7 +39,7 @@ const compressInterfaces = (interfaces: InterfaceTemplate[]) => {
     ...regular,
     ...extending
       .filter(({extendsName}) => !!extendsName)
-      .map((item) => ({...item, pureValue: purify(item), extendsName: null, value: null})),
+      .map((item) => ({...item, pureValue: purify(item), extendsName: null})),
   ];
 };
 
@@ -53,14 +51,23 @@ const trimIndentation = (data: string): string => {
 const removeName = (data: string): string => data.replace(/\s*interface \w+ (?={)/g, '');
 
 function main() {
-  Array.from(Array(4).keys()).map((index) => {
+  Array.from(Array(5).keys()).map((index) => {
     const filename = `./samples/sample${index + 1}`;
     const data = fs.readFileSync(`${filename}.ts`).toString();
 
     const foundInterfaces = findInterfaces(trimIndentation(data));
 
     const result = compressInterfaces(foundInterfaces)
-      .map((item) => `interface ${item.name} {\n` + item.pureValue + '}\n')
+      .map((item) => {
+        const secondLevelType = item.pureValue.match(/(?<=: )[A-Z]\w+/g)?.[0];
+        const pure = !!secondLevelType
+          ? item.pureValue.replace(
+              secondLevelType,
+              `{\n  ` + foundInterfaces.find((item) => item.name === secondLevelType)?.pureValue + `}`,
+            ) // TODO:  copy space count from parent
+          : item.pureValue;
+        return `interface ${item.name} {\n` + pure + `}\n`;
+      })
       .join('\n');
 
     fs.writeFileSync(`${filename}_blob.ts`, result);
